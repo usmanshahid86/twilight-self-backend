@@ -1,0 +1,29 @@
+{
+  "name": "twilight-self-backend",
+  "version": "1.0.0",
+  "description": "Backend server for verifying Self Protocol identity proofs in the Twilight Relayer ecosystem",
+  "main": "server.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "nodemon server.mjs",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "self-protocol",
+    "identity-verification",
+    "twilight",
+    "blockchain",
+    "kyc"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@selfxyz/core": "^1.0.8",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "dotenv": "^16.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}

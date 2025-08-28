@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome App - Self Protocol Verification</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            background: #1a1a1a;
+            color: white;
+            min-height: 100vh;
+        }
+        
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        
+        .hero-section {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex: 1;
+            padding: 2rem;
+        }
+        
+        .welcome-container {
+            text-align: center;
+            padding: 3rem;
+            background: #2c3e50;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        h1 {
+            font-size: 3rem;
+            margin: 0 0 1rem 0;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+        }
+        
+        .subtitle {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            margin-bottom: 2rem;
+        }
+        
+        .verify-button {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a52);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 10px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
+            margin-top: 1rem;
+        }
+        
+        .verify-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4);
+        }
+        
+        .error-message {
+            background: rgba(255, 107, 107, 0.2);
+            border: 1px solid rgba(255, 107, 107, 0.5);
+            border-radius: 10px;
+            padding: 1rem;
+            margin: 1rem 0;
+            text-align: center;
+        }
+        
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            max-width: 1200px;
+            margin: 3rem auto;
+            padding: 0 2rem;
+        }
+        
+        .feature-card {
+            background: #f8f9fa;
+            color: #2c3e50;
+            border-radius: 15px;
+            padding: 2rem;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: transform 0.3s ease;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .feature-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        
+        .feature-title {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+        
+        /* Mobile Responsive */
+        @media (max-width: 768px) {
+            .features-grid {
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="hero-section">
+            <div class="welcome-container">
+                <h1 id="welcome-message">Welcome</h1>
+                <p class="subtitle">Secure identity verification powered by Self Protocol</p>
+                <button class="verify-button" onclick="showVerification()">
+                    🛡️ Verify Identity
+                </button>
+                <div id="error-message" class="error-message" style="display: none;">
+                    <p>⚠️ JavaScript module loading error. Check browser console for details.</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🔐</div>
+                <div class="feature-title">Zero-Knowledge Proofs</div>
+                <p>Your personal data stays private. We only verify what's necessary without seeing your raw documents.</p>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <div class="feature-title">Instant Verification</div>
+                <p>Get verified in seconds using your government-issued documents through the Self app.</p>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">🌍</div>
+                <div class="feature-title">Global Support</div>
+                <p>Works with passports and identity documents from countries worldwide.</p>
+            </div>
+        </div>
+        
+        <div class="verification-section" id="verification-section">
+            <!-- Self Protocol verification will be injected here -->
+        </div>
+    </div>
+    
+    <script>
+        // Simple fallback function
+        function showVerification() {
+            console.log('🔘 Verify Identity clicked');
+            
+            if (window.WelcomeApp) {
+                window.WelcomeApp.showVerificationPrompt();
+            } else {
+                document.getElementById('error-message').style.display = 'block';
+                console.error('❌ WelcomeApp not loaded');
+            }
+        }
+        
+        console.log('✅ Basic JavaScript is working');
+    </script>
+    
+    <!-- Load the simple version without ES module imports -->
+    <script src="./dist/main-simple.js"></script>
+</body>
+</html>
