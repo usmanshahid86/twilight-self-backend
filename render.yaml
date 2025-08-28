@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: twilight-self-backend
+    env: node
+    buildCommand: npm install
+    startCommand: node server.mjs
+    envVars:
+      - key: PORT
+        value: 3001
+      - key: SELF_SCOPE
+        value: twilight-relayer-passport
+      - key: SELF_MOCK_MODE
+        value: true
+      - key: CORS_ORIGINS
+        value: http://localhost:3000,http://localhost:5173
