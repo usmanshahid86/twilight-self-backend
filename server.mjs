@@ -48,9 +48,16 @@ app.use(express.json());
 
 // Self Protocol Configuration from environment
 const verification_config = {
-  excludedCountries: process.env.EXCLUDED_COUNTRIES ? JSON.parse(process.env.EXCLUDED_COUNTRIES) : [],
-  ofac: process.env.OFAC_CHECK === 'true',
-  minimumAge: parseInt(process.env.MIN_AGE || '18', 10),
+  excludedCountries: (() => {
+    try {
+      return process.env.EXCLUDED_COUNTRIES ? JSON.parse(process.env.EXCLUDED_COUNTRIES) : [];
+    } catch (e) {
+      console.warn('❌ Failed to parse EXCLUDED_COUNTRIES, using empty array:', e.message);
+      return [];
+    }
+  })(),
+  ofac: process.env.OFAC_CHECK === 'true'
+  // minimumAge field removed entirely
 };
 
 // Initialize Self Protocol Backend Verifier
@@ -67,7 +74,7 @@ try {
     process.env.SELF_MOCK_MODE === 'true',
     AllIds, // Accept all document types
     configStore,
-    "hex" // "hex" for addresses, "uuid" for UUIDs
+    "uuid" // "hex" for addresses, "uuid" for UUIDs
   );
   
   console.log('✅ Self Backend Verifier initialized successfully');
@@ -133,16 +140,44 @@ app.post('/api/verify', async (req, res) => {
     console.log('✅ Self Protocol verification result:', result);
     // Check if verification was successful
     if (result.isValidDetails.isValid) {
-      const response = {
-        status: "success",
-        result: true,
-        credentialSubject: result.discloseOutput,
-        timestamp: new Date().toISOString(),
-        attestationId: attestationId
-      };
-      
-      console.log('🎉 Verification successful! Returning:', response);
-      res.json(response);
+      // 1. Extract and log user identifier
+      console.log("👤 User Identifier:", result.userData.userIdentifier);
+
+      // 2a. Check expiry date
+      const expiryDate = new Date(result.discloseOutput.expiryDate);
+      const oneYearFromNow = new Date();
+      oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
+
+      const isExpiryValid = expiryDate > oneYearFromNow;
+      console.log("📅 Document Expiry:", {
+        expiryDate: expiryDate.toISOString().split("T")[0],
+        hasOneYearValidity: isExpiryValid,
+        message: isExpiryValid
+          ? "✅ Document has more than 1 year validity"
+          : "❌ Document expires within 1 year",
+      });
+
+      // 2b. Verify issuing country
+      const allowedCountries = ["CHN", "IDN", "MYS", "USA"];
+      const issuingCountry = result.discloseOutput.issuingState;
+      const isCountryAllowed = allowedCountries.includes(issuingCountry);
+
+      console.log("🌍 Issuing Country:", {
+        country: issuingCountry,
+        isAllowed: isCountryAllowed,
+        message: isCountryAllowed
+          ? "✅ Document is from an allowed country"
+          : "❌ Document is not from an allowed country",
+      });
+
+     const response = {
+       status: "success",
+       message: "Verification completed",
+       timestamp: new Date().toISOString(),
+     };
+
+     console.log("🎉 Verification successful!");
+     res.json(response);
     } else {
       // Verification failed
       const response = {
