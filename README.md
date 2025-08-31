@@ -19,7 +19,10 @@ A Node.js backend server for verifying Self Protocol identity proofs in the Twil
    CORS_ORIGINS=http://localhost:3000,http://localhost:5173
    ```
 
-3. Start server:
+3. Setup Database:
+   install psql and run the database.sql file to initialize the DB.
+
+4. Start server:
    ```bash
    npm start
    ```
