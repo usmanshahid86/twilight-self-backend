@@ -1,7 +1,7 @@
 /**
  * Self + ZKPassport Backend Server (ESM)
  */
-import { saveVerification, checkAttestationExists } from "./database.mjs";
+import { saveVerification, checkAttestationExists, saveSelfCheck } from "./database.mjs";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -26,20 +26,21 @@ const port = process.env.PORT || 3001;
 
 const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(",")
-  : ["http://localhost:3000", "http://localhost:3001", "http://localhost:4173", "http://localhost:5173"];
+  : ["http://localhost:3000","http://localhost:3001","http://localhost:4173","http://localhost:5173"];
 
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (!origin) return cb(null, true); // allow curl/server-to-server
-      return cb(null, corsOrigins.includes(origin));
-    },
-    credentials: true,
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type"],
-    maxAge: 86400,
-  })
-);
+const corsMw = cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    cb(null, corsOrigins.includes(origin));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type"],
+  maxAge: 86400,
+});
+
+app.use(corsMw);                // keep this
+app.options("*", corsMw); 
 
 // generous body limits (zk proofs can be large)
 app.use(express.json({ limit: "50mb", type: "application/json" }));
@@ -97,8 +98,6 @@ try {
 } catch (err) {
   console.error("❌ Failed to initialize Self Backend Verifier:", err);
 }
-
-app.options("*", (req, res) => res.sendStatus(204));
 
 // ----------
 // Healthcheck
@@ -238,7 +237,7 @@ app.post("/api/verify/self", async (req, res) => {
       return res.status(404).json({
         status: "error",
         message: "Attestation ID not found in selfcheck table",
-        attestationId,
+        uuid,
         timestamp: new Date().toISOString(),
       });
     }
@@ -326,7 +325,7 @@ app.post("/api/verify/zkpass", async (req, res) => {
       serverUID,
       match: clientUID ? clientUID === serverUID : null,
       queryResultErrors,
-      address: address ?? null,
+      address: cosmosAddress ?? null,
       timestamp: new Date().toISOString(),
     });
   } catch (e) {
