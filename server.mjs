@@ -117,7 +117,7 @@ app.post("/api/verify", async (req, res) => {
 
     const { attestationId, proof, publicSignals, userContextData} = req.body;
 
-    if (!proof || !publicSignals || !attestationId || !userContextData || !cosmosAddress) {
+    if (!proof || !publicSignals || !attestationId || !userContextData) {
       return res.status(400).json({
         status: "error",
         message:
