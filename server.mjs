@@ -24,23 +24,28 @@ if (missingEnvVars.length > 0) {
 const app = express();
 const port = process.env.PORT || 3001;
 
-const corsOrigins = process.env.CORS_ORIGINS
-  ? process.env.CORS_ORIGINS.split(",")
-  : ["http://localhost:3000","http://localhost:3001","http://localhost:4173","http://localhost:5173"];
+// allow your dev origins; add any others you use
+const allowedOrigins = [
+  "http://localhost:4173",
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "http://localhost:3001",
+];
 
 const corsMw = cors({
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true);
-    cb(null, corsOrigins.includes(origin));
+    if (!origin) return cb(null, true); // allow curl/server-to-server
+    cb(null, allowedOrigins.includes(origin));
   },
-  credentials: true,
+  credentials: false,                       // you aren't sending cookies/Authorization
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type"],
   maxAge: 86400,
 });
 
-app.use(corsMw);                // keep this
-app.options("*", corsMw); 
+app.use(corsMw);                             // attach globally
+app.options("/api/verify/zkpass", corsMw);   // <-- explicit preflight handler
+app.options("/api/verify", corsMw);  
 
 // generous body limits (zk proofs can be large)
 app.use(express.json({ limit: "50mb", type: "application/json" }));
