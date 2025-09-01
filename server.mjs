@@ -84,7 +84,7 @@ const verification_config = {
       return [];
     }
   })(),
-  ofac: process.env.OFAC_CHECK === "true",
+  ofac: process.env.OFAC_CHECK === "false",
   // minimumAge intentionally omitted
 };
 
