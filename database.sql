@@ -13,6 +13,8 @@ SET default_tablespace = '';
 --
 -- Name: address; Type: TABLE; Schema: public; Owner: forkscanner
 --
+CREATE USER zkpass WITH PASSWORD 'zkpass';
+
 Create database zkpass;
 
 \c zkpass
