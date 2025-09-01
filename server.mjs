@@ -165,7 +165,7 @@ app.post("/api/verify", async (req, res) => {
       try {
         // If your DB helper accepts only (identifier, address), use attestationId + cosmosAddress.
         // If you extended it to accept a provider, pass 'self' as third param.
-        await saveSelfCheck(attestationId, proof);
+        await saveSelfCheck(result.userData?.userIdentifier, proof);
         console.log("💾 Self check saved");
       } catch (dbErr) {
         console.error("DB save failed (self):", dbErr);
@@ -209,10 +209,10 @@ app.post("/api/verify/self", async (req, res) => {
   try {
     console.log("📨 Received Self verification request:", req.body);
     
-    const { cosmosAddress, attestationId } = req.body;
+    const { cosmosAddress, uuid } = req.body;
     
     // Validate required fields
-    if (!cosmosAddress || !attestationId) {
+    if (!cosmosAddress || !uuid) {
       return res.status(400).json({
         status: "error",
         message: "cosmosAddress and attestationId are required",
@@ -220,10 +220,10 @@ app.post("/api/verify/self", async (req, res) => {
       });
     }
     
-    console.log("🔍 Checking if attestation ID exists:", attestationId);
+    console.log("🔍 Checking if attestation ID exists:", uuid);
     
     // Check if attestation ID exists in selfcheck table
-    const attestationExists = await checkAttestationExists(attestationId);
+    const attestationExists = await checkAttestationExists(uuid);
     
     if (!attestationExists) {
       console.log("❌ Attestation ID not found in selfcheck table");
@@ -238,7 +238,7 @@ app.post("/api/verify/self", async (req, res) => {
     console.log("✅ Attestation ID found, saving to zkpass table");
     
     // Save to zkpass table with provider as 'self'
-    const savedRecord = await saveVerification(attestationId, cosmosAddress, 'self');
+    const savedRecord = await saveVerification(uuid, cosmosAddress, 'self');
     
     console.log("💾 Data saved successfully:", savedRecord);
     
