@@ -307,7 +307,7 @@ app.post("/api/verify/zkpass", async (req, res) => {
     console.log("🔑 ZKPass client UID:", clientUID);
 
     // Verify with SDK (off-chain)
-    const zk = new ZKPassport("localhost:4173");
+    const zk = new ZKPassport(process.env.ZKPASS_DOMAIN || "localhost:4173");
     const { verified, uniqueIdentifier: serverUID, queryResultErrors } =
       await zk.verify({
         proofs,
