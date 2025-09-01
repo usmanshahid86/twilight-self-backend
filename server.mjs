@@ -274,7 +274,7 @@ app.post("/api/verify/zkpass", async (req, res) => {
       result,
       scope,
       uniqueIdentifier: clientUID,
-      address, // optional: wallet address or user address from FE
+      cosmosAddress, // optional: wallet address or user address from FE
       devMode, // optional: allow FE to toggle mock/dev mode; fallback below
     } = body;
 
@@ -303,7 +303,7 @@ app.post("/api/verify/zkpass", async (req, res) => {
     if (serverUID == clientUID && verified ==  true){
       try {
         // If your DB helper accepts only (identifier, address), we store (clientUID || serverUID)
-        await saveVerification(clientUID || serverUID, address ?? null);
+        await saveVerification(clientUID || serverUID, cosmosAddress ?? null);
         console.log("💾 ZKPass verification saved");
       } catch (dbErr) {
         console.error("DB save failed (zkpass):", dbErr);
