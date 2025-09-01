@@ -3,10 +3,10 @@ import { Pool } from "pg";
 
 // Database configuration
 const pool = new Pool({
-  user: process.env.DB_USER || "postgres",
+  user: process.env.DB_USER || "zkpass",
   host: process.env.DB_HOST || "localhost",
-  database: process.env.DB_NAME || "zkpassport",
-  password: process.env.DB_PASSWORD || "postgres",
+  database: process.env.DB_NAME || "zkpass",
+  password: process.env.DB_PASSWORD || "zkpass",
   port: parseInt(process.env.DB_PORT || "5432", 10),
 });
 
