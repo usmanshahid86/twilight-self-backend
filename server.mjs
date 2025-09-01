@@ -321,7 +321,7 @@ app.post("/api/verify/zkpass", async (req, res) => {
     if (serverUID == clientUID && verified ==  true){
       try {
         // If your DB helper accepts only (identifier, address), we store (clientUID || serverUID)
-        await saveVerification(clientUID || serverUID, cosmosAddress ?? null);
+        await saveVerification(clientUID || serverUID, cosmosAddress ?? null, "zkpass");
         console.log("💾 ZKPass verification saved");
       } catch (dbErr) {
         console.error("DB save failed (zkpass):", dbErr);
