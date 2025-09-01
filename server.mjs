@@ -15,7 +15,7 @@ import {
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 // Prefer the package entry if it resolves to CJS; otherwise target the cjs build directly:
-const { ZKPassport } = require("@zkpassport/sdk/dist/cjs/index.js");
+const { ZKPassport } = require("@zkpassport/sdk");
 
 // env
 dotenv.config();
