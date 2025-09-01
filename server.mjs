@@ -30,8 +30,14 @@ const corsOrigins = process.env.CORS_ORIGINS
 
 app.use(
   cors({
-    origin: corsOrigins,
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true); // allow curl/server-to-server
+      return cb(null, corsOrigins.includes(origin));
+    },
     credentials: true,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type"],
+    maxAge: 86400,
   })
 );
 
@@ -91,6 +97,8 @@ try {
 } catch (err) {
   console.error("❌ Failed to initialize Self Backend Verifier:", err);
 }
+
+app.options("*", (req, res) => res.sendStatus(204));
 
 // ----------
 // Healthcheck
