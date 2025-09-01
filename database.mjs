@@ -26,4 +26,34 @@ export async function saveVerification(uniqueIdentifier, address, provider) {
   }
 }
 
+export async function saveSelfCheck(attestationId, proof) {
+  try {
+    const result = await pool.query(
+      `INSERT INTO selfcheck (attestationId, proof)
+       VALUES ($1, $2)
+       RETURNING *`,
+      [attestationId, proof] // address -> $1, uniqueIdentifier -> $2, provider -> $3
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error("Error saving verification:", error);
+    throw error;
+  }
+}
+
+// Check if attestation ID exists in selfcheck table
+export async function checkAttestationExists(attestationId) {
+  try {
+    const result = await pool.query(
+      `SELECT COUNT(*) as count FROM selfcheck WHERE attestationId = $1`,
+      [attestationId]
+    );
+    return parseInt(result.rows[0].count) > 0;
+  } catch (error) {
+    console.error("Error checking attestation existence:", error);
+    throw error;
+  }
+}
+
+
 export { pool };

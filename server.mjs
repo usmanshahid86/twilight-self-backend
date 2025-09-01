@@ -1,7 +1,7 @@
 /**
  * Self + ZKPassport Backend Server (ESM)
  */
-import { saveVerification } from "./database.mjs";
+import { saveVerification, checkAttestationExists } from "./database.mjs";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -108,14 +108,14 @@ app.get("/health", (_req, res) => {
 // ---------------------------------------------
 // Self Protocol verification endpoint (existing)
 // ---------------------------------------------
-app.post("/api/verify/self", async (req, res) => {
+app.post("/api/verify", async (req, res) => {
   try {
     if (req.method === "OPTIONS") return res.sendStatus(200);
 
     console.log("📨 Received Self verification request:", req.body);
     if (!selfBackendVerifier) throw new Error("Self Backend Verifier not initialized");
 
-    const { attestationId, proof, publicSignals, userContextData, cosmosAddress } = req.body;
+    const { attestationId, proof, publicSignals, userContextData} = req.body;
 
     if (!proof || !publicSignals || !attestationId || !userContextData || !cosmosAddress) {
       return res.status(400).json({
@@ -165,8 +165,8 @@ app.post("/api/verify/self", async (req, res) => {
       try {
         // If your DB helper accepts only (identifier, address), use attestationId + cosmosAddress.
         // If you extended it to accept a provider, pass 'self' as third param.
-        await saveVerification(attestationId, cosmosAddress);
-        console.log("💾 Self verification saved");
+        await saveSelfCheck(attestationId, proof);
+        console.log("💾 Self check saved");
       } catch (dbErr) {
         console.error("DB save failed (self):", dbErr);
         // continue anyway
@@ -195,6 +195,60 @@ app.post("/api/verify/self", async (req, res) => {
       console.log("❌ Self verification failed:", response);
       return res.status(400).json(response);
     }
+  } catch (error) {
+    console.error("❌ /api/verify/self error:", error);
+    return res.status(500).json({
+      status: "error",
+      message: error?.message || "Internal server error",
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+app.post("/api/verify/self", async (req, res) => {
+  try {
+    console.log("📨 Received Self verification request:", req.body);
+    
+    const { cosmosAddress, attestationId } = req.body;
+    
+    // Validate required fields
+    if (!cosmosAddress || !attestationId) {
+      return res.status(400).json({
+        status: "error",
+        message: "cosmosAddress and attestationId are required",
+        timestamp: new Date().toISOString(),
+      });
+    }
+    
+    console.log("🔍 Checking if attestation ID exists:", attestationId);
+    
+    // Check if attestation ID exists in selfcheck table
+    const attestationExists = await checkAttestationExists(attestationId);
+    
+    if (!attestationExists) {
+      console.log("❌ Attestation ID not found in selfcheck table");
+      return res.status(404).json({
+        status: "error",
+        message: "Attestation ID not found in selfcheck table",
+        attestationId,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    
+    console.log("✅ Attestation ID found, saving to zkpass table");
+    
+    // Save to zkpass table with provider as 'self'
+    const savedRecord = await saveVerification(attestationId, cosmosAddress, 'self');
+    
+    console.log("💾 Data saved successfully:", savedRecord);
+    
+    return res.json({
+      status: "success",
+      message: "Verification data saved successfully",
+      data: savedRecord,
+      timestamp: new Date().toISOString(),
+    });
+    
   } catch (error) {
     console.error("❌ /api/verify/self error:", error);
     return res.status(500).json({

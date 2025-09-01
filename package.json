@@ -21,7 +21,8 @@
     "@selfxyz/core": "^1.0.8",
     "cors": "^2.8.5",
     "express": "^4.21.2",
-    "dotenv": "^16.0.0"
+    "dotenv": "^16.0.0",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

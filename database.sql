@@ -20,8 +20,14 @@ Create database zkpass;
 CREATE TABLE public.zkpass (
     address text NOT NULL,
     identifier text NOT NULL,
-    provider text NOT NULL,
+    provider text NOT NULL
 );
 
 
+Create Table public.selfcheck (
+    attestaionId text NOT NULL,
+    proof text NOT NULL
+);
+
 ALTER TABLE public.zkpass OWNER TO zkpass;
+ALTER TABLE public.selfcheck OWNER TO zkpass;
