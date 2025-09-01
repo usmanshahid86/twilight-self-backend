@@ -11,6 +11,8 @@ import {
   DefaultConfigStore,
 } from "@selfxyz/core";
 
+import { ZKPassport } from "@zkpassport/sdk";
+
 // env
 dotenv.config();
 
@@ -301,7 +303,7 @@ app.post("/api/verify/zkpass", async (req, res) => {
     console.log("🔑 ZKPass client UID:", clientUID);
 
     // Verify with SDK (off-chain)
-    const zk = new (await import("@zkpassport/sdk")).ZKPassport();
+    const zk = new ZKPassport();
     const { verified, uniqueIdentifier: serverUID, queryResultErrors } =
       await zk.verify({
         proofs,
