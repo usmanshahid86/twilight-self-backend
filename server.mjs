@@ -201,10 +201,25 @@ app.post("/api/verify", async (req, res) => {
         // If you extended it to accept a provider, pass 'self' as third param.
         await saveSelfCheck(result.userData?.userIdentifier, proof);
         console.log("💾 Self check saved");
+        // Decode the hex-encoded cosmos address from userDefinedData
+        const cosmosAddress = Buffer.from(
+          result.userData?.userDefinedData,
+          "hex"
+        ).toString("utf8");
+        console.log("Decoded cosmos address:", cosmosAddress);
+        // validation of cosmos address before saving
+        if (!cosmosAddress.startsWith("twilight")) {
+          throw new Error("Invalid cosmos address format");
+        }
+
         // Save to zkpass table with provider as 'self'
-        const savedRecord = await saveVerification(result.userData?.userIdentifier, result.userData?.userContextData, "self");
+        const savedRecord = await saveVerification(
+          result.userData?.userIdentifier,
+          cosmosAddress,
+          "self"
+        );
         console.log("uuid:", result.userData?.userIdentifier);
-        console.log("cosmosAddress:", result.userData?.userContextData);
+
         console.log("💾 Data saved successfully:", savedRecord);
       } catch (dbErr) {
         console.error("DB save failed (self):", dbErr);
