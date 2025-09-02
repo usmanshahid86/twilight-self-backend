@@ -29,7 +29,7 @@ export async function saveVerification(uniqueIdentifier, address, provider) {
 export async function saveSelfCheck(attestationId, proof) {
   try {
     const result = await pool.query(
-      `INSERT INTO selfcheck (attestationId, proof)
+      `INSERT INTO selfcheck (attestationid, proof)
        VALUES ($1, $2)
        RETURNING *`,
       [attestationId, proof] // address -> $1, uniqueIdentifier -> $2, provider -> $3
@@ -45,7 +45,7 @@ export async function saveSelfCheck(attestationId, proof) {
 export async function checkAttestationExists(attestationId) {
   try {
     const result = await pool.query(
-      `SELECT COUNT(*) as count FROM selfcheck WHERE attestationId = $1`,
+      `SELECT COUNT(*) as count FROM selfcheck WHERE attestationid = $1`,
       [attestationId]
     );
     return parseInt(result.rows[0].count) > 0;

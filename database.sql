@@ -27,7 +27,7 @@ CREATE TABLE public.zkpass (
 
 
 Create Table public.selfcheck (
-    attestaionId text NOT NULL,
+    attestationId text NOT NULL,
     proof text NOT NULL
 );
 
