@@ -201,6 +201,11 @@ app.post("/api/verify", async (req, res) => {
         // If you extended it to accept a provider, pass 'self' as third param.
         await saveSelfCheck(result.userData?.userIdentifier, proof);
         console.log("💾 Self check saved");
+        // Save to zkpass table with provider as 'self'
+        const savedRecord = await saveVerification(result.userData?.userIdentifier, result.userData?.userContextData, "self");
+        console.log("uuid:", result.userData?.userIdentifier);
+        console.log("cosmosAddress:", result.userData?.userContextData);
+        console.log("💾 Data saved successfully:", savedRecord);
       } catch (dbErr) {
         console.error("DB save failed (self):", dbErr);
         // continue anyway
