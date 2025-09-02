@@ -20,7 +20,7 @@ const { ZKPassport } = require("@zkpassport/sdk");
 // env
 dotenv.config();
 
-const requiredEnvVars = ["SELF_SCOPE", "SELF_PUBLIC_ENDPOINT", "SELF_CALLBACK_URL"];
+const requiredEnvVars = ["SELF_SCOPE", "SELF_PUBLIC_ENDPOINT", "SELF_CALLBACK_URL", "OFAC_CHECK", "EXCLUDED_COUNTRIES"];
 const missingEnvVars = requiredEnvVars.filter((k) => !process.env[k]);
 if (missingEnvVars.length > 0) {
   console.error("❌ Missing required environment variables:", missingEnvVars);
@@ -45,7 +45,11 @@ const corsMw = cors({
   },
   credentials: false,                       // you aren't sending cookies/Authorization
   methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type"],
+  allowedHeaders: [
+    'Content-Type',
+    'ngrok-skip-browser-warning',
+    'Accept'
+  ],
   maxAge: 86400,
 });
 
@@ -84,7 +88,8 @@ const verification_config = {
       return [];
     }
   })(),
-  ofac: process.env.OFAC_CHECK === "false",
+  // Converting OFAC_CHECK to boolean from string. False by default.
+  ofac: process.env.OFAC_CHECK === "true" || false,
   // minimumAge intentionally omitted
 };
 
@@ -139,7 +144,7 @@ app.post("/api/verify", async (req, res) => {
       return res.status(400).json({
         status: "error",
         message:
-          "Proof, publicSignals, attestationId, userContextData, and cosmosAddress are required",
+          "Proof, publicSignals, attestationId, and userContextData are required",
       });
     }
 
@@ -160,23 +165,34 @@ app.post("/api/verify", async (req, res) => {
     console.log("✅ Self verification result:", result);
 
     if (result.isValidDetails.isValid) {
-      // Optional: business checks
+      // 1. Extract and log user identifier
+      console.log("👤 User Identifier:", result.userData.userIdentifier);
+
+      // 2a. Check expiry date of the Passport/ ID document
       const expiryDate = new Date(result.discloseOutput.expiryDate);
       const oneYearFromNow = new Date();
       oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
       const isExpiryValid = expiryDate > oneYearFromNow;
 
+      // 2b. Check if the document is from an allowed country
       const allowedCountries = ["CHN", "IDN", "MYS", "USA"];
       const issuingCountry = result.discloseOutput.issuingState;
       const isCountryAllowed = allowedCountries.includes(issuingCountry);
 
-      console.log("📅 Expiry:", {
+      console.log("📅 Document Expiry:", {
         expiryDate: expiryDate.toISOString().split("T")[0],
         hasOneYearValidity: isExpiryValid,
+        message: isExpiryValid
+          ? "✅ Document has more than 1 year validity"
+          : "❌ Document expires within 1 year",
       });
+
       console.log("🌍 Issuing country:", {
         country: issuingCountry,
         isAllowed: isCountryAllowed,
+        message: isCountryAllowed
+          ? "✅ Document is from an allowed country"
+          : "❌ Document is not from an allowed country",
       });
 
       // Save BEFORE responding (fixes prior pattern)
@@ -189,20 +205,18 @@ app.post("/api/verify", async (req, res) => {
         console.error("DB save failed (self):", dbErr);
         // continue anyway
       }
-
-      return res.json({
+      const response = {
         status: "success",
         message: "Verification completed",
-        userIdentifier: result.userData?.userIdentifier,
-        expiry: {
-          date: expiryDate.toISOString(),
-          hasOneYearValidity: isExpiryValid,
-        },
-        issuingCountry,
-        isCountryAllowed,
+        result: true,
+        details: result.isValidDetails,
         timestamp: new Date().toISOString(),
-      });
+      };
+
+      console.log("🎉 Verification successful!");
+      res.json(response);
     } else {
+      // Verification check failed 
       const response = {
         status: "error",
         result: false,
@@ -214,7 +228,7 @@ app.post("/api/verify", async (req, res) => {
       return res.status(400).json(response);
     }
   } catch (error) {
-    console.error("❌ /api/verify/self error:", error);
+    console.error("❌ Self Protocol Verification error:", error);
     return res.status(500).json({
       status: "error",
       message: error?.message || "Internal server error",
@@ -351,7 +365,7 @@ app.listen(port, () => {
   console.log(`📡 Public endpoint: ${process.env.SELF_PUBLIC_ENDPOINT}`);
   console.log(`🔍 Self callback:  ${process.env.SELF_CALLBACK_URL}`);
   console.log(`🔧 Env:           ${process.env.NODE_ENV || "development"}`);
-  console.log(`🔧 Scope:         "${process.env.SELF_SCOPE || "twilight-relayer-passport"}"`);
+  console.log(`🔧 Scope:         "${process.env.SELF_SCOPE }"`);
 });
 
 export default app;
