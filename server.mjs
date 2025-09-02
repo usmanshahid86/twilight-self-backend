@@ -103,7 +103,7 @@ try {
     process.env.SELF_MOCK_MODE === "true",
     AllIds, // accept all doc types
     configStore,
-    "hex" // "hex" for addresses, "uuid" for UUIDs
+    "uuid" // "hex" for addresses, "uuid" for UUIDs
   );
   console.log("✅ Self Backend Verifier initialized");
   console.log("📋 Configuration:", {
