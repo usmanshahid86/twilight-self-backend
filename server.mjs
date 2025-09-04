@@ -180,7 +180,7 @@ app.post("/api/verify", async (req, res) => {
       const isCountryAllowed = allowedCountries.includes(issuingCountry);
 
       console.log("📅 Document Expiry:", {
-        expiryDate: expiryDate.toISOString().split("T")[0],
+        //expiryDate: expiryDate.toISOString().split("T")[0],
         hasOneYearValidity: isExpiryValid,
         message: isExpiryValid
           ? "✅ Document has more than 1 year validity"
