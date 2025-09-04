@@ -13,6 +13,7 @@ import {
 
 
 import { createRequire } from "module";
+import { verifySignature } from "./verification.mjs";
 const require = createRequire(import.meta.url);
 // Prefer the package entry if it resolves to CJS; otherwise target the cjs build directly:
 const { ZKPassport } = require("@zkpassport/sdk");
@@ -316,7 +317,6 @@ app.post("/api/verify/self", async (req, res) => {
 // ----------------------------------------
 app.post("/api/verify/zkpass", async (req, res) => {
   try {
-    // If you enabled express.raw above, you’d parse Buffer here.
     const body = req.body ?? {};
 
     // Accept either "queryResult" (preferred) or "result" (older FE)
@@ -326,51 +326,71 @@ app.post("/api/verify/zkpass", async (req, res) => {
       result,
       scope,
       uniqueIdentifier: clientUID,
-      cosmosAddress, // optional: wallet address or user address from FE
-      devMode, // optional: allow FE to toggle mock/dev mode; fallback below
+      devMode,              // optional: FE toggle
+      bech32Address,        // e.g., cosmos1...
+      pubkeyB64,            // base64 secp256k1 public key
+      signatureB64,         // base64 signature
+      message,              // string you asked the wallet to sign (preferred)
     } = body;
 
     const qr = queryResult ?? result;
 
     if (!proofs || !qr || !scope) {
-      return res
-        .status(400)
-        .json({ error: "missing fields", have: Object.keys(body) });
+      return res.status(400).json({ error: "missing fields", have: Object.keys(body) });
     }
 
+    // 1) Verify ZKPassport off-chain
     console.log("🔑 ZKPass client UID:", clientUID);
-
-    // Verify with SDK (off-chain)
     const zk = new ZKPassport(process.env.ZKPASS_DOMAIN || "localhost:4173");
-    const { verified, uniqueIdentifier: serverUID, queryResultErrors } =
-      await zk.verify({
-        proofs,
-        queryResult: qr,
-        scope,
-        devMode: typeof devMode === "boolean" ? devMode : true, // match your FE defaults
-        // validity: 180, // optional: days since last ID scan
-      });
+    const { verified, uniqueIdentifier: serverUID, queryResultErrors } = await zk.verify({
+      proofs,
+      queryResult: qr,
+      scope,
+      devMode: typeof devMode === "boolean" ? devMode : true,
+    });
 
-    // Save BEFORE responding (best practice)
-    if (serverUID == clientUID && verified ==  true){
+    // 2) Verify address/signature (Cosmos ADR-036)
+    // These four are required to verify: address + (signDoc or message) + pubkey + signature
+    if (!bech32Address || !pubkeyB64 || !signatureB64 || (!signDoc && !message)) {
+      return res.status(400).json({
+        error: "missing address-signature fields",
+        required: "bech32Address, pubkeyB64, signatureB64, and (signDoc OR message)"
+      });
+    }
+
+    let addrSigOk = false;
+    try {
+       result = verifySignature(bech32Address, signatureB64, pubkeyB64, message);
+       addrSigOk = result.ok;
+    } catch (e) {
+      console.error("ADR-036 verify error:", e);
+      addrSigOk = false;
+    }
+
+    // 3) Only persist if BOTH ZK verification and address-signature verification pass
+    if (verified === true && clientUID === serverUID && addrSigOk) {
       try {
-        // If your DB helper accepts only (identifier, address), we store (clientUID || serverUID)
         await saveVerification(clientUID || serverUID, cosmosAddress ?? null, "zkpass");
         console.log("💾 ZKPass verification saved");
       } catch (dbErr) {
         console.error("DB save failed (zkpass):", dbErr);
         // continue anyway
       }
+    }else{
+      console.log("❌ Verification not saved: zkpass verified =", verified, "clientUID === serverUID:", clientUID === serverUID, "addrSigOk =", addrSigOk);
+      return  res.status(400).json({ error: "verification_failed" });
     }
 
     return res.json({
-      status: verified ? "success" : "error",
-      verified,
+      status: verified && addrSigOk ? "success" : "error",
+      verified,              // zkpass verdict
+      addrSigOk,             // cosmos signature/address verdict
       clientUID,
       serverUID,
       match: clientUID ? clientUID === serverUID : null,
       queryResultErrors,
       address: cosmosAddress ?? null,
+      bech32Address,
       timestamp: new Date().toISOString(),
     });
   } catch (e) {
@@ -378,6 +398,10 @@ app.post("/api/verify/zkpass", async (req, res) => {
     return res.status(500).json({ error: "verification_failed" });
   }
 });
+
+x = verifySignature("twilight1tpged5whfk2pkfv8sz064v5qvap8h7kcdkmwct", "yjwMhMd9ZHH3IKIL/x/8vcBih8HntABKDRMkfR0428Ua+WCtIz8SmkV92DptZdEK4T+Y6Im2y4RetUJyMp31eQ==", "AjK6sm+6krANsHV7yeuAiOvY4IJ8OTwe3XFGm7y1DheH", "Hello Twilight!");
+console.log("ADR-036 verify result:", x);
+
 
 // start server
 app.listen(port, () => {
