@@ -1,7 +1,7 @@
 /**
  * Self + ZKPassport Backend Server (ESM)
  */
-import { saveVerification, checkAttestationExists, saveSelfCheck } from "./database.mjs";
+import { saveVerification, checkAttestationExists, saveSelfCheck, checkAddressExists } from "./database.mjs";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -11,8 +11,14 @@ import {
   DefaultConfigStore,
 } from "@selfxyz/core";
 
+import { bech32 } from "bech32";
+import { rawSecp256k1PubkeyToRawAddress } from "@cosmjs/amino";
+import { TxRaw, AuthInfo } from "cosmjs-types/cosmos/tx/v1beta1/tx.js";
+import { PubKey as SecpPubKey } from "cosmjs-types/cosmos/crypto/secp256k1/keys.js";
+
 
 import { createRequire } from "module";
+// import { verifySignature } from "./verification.mjs";
 const require = createRequire(import.meta.url);
 // Prefer the package entry if it resolves to CJS; otherwise target the cjs build directly:
 const { ZKPassport } = require("@zkpassport/sdk");
@@ -180,7 +186,7 @@ app.post("/api/verify", async (req, res) => {
       const isCountryAllowed = allowedCountries.includes(issuingCountry);
 
       console.log("📅 Document Expiry:", {
-        //expiryDate: expiryDate.toISOString().split("T")[0],
+        expiryDate: expiryDate.toISOString().split("T")[0],
         hasOneYearValidity: isExpiryValid,
         message: isExpiryValid
           ? "✅ Document has more than 1 year validity"
@@ -316,7 +322,6 @@ app.post("/api/verify/self", async (req, res) => {
 // ----------------------------------------
 app.post("/api/verify/zkpass", async (req, res) => {
   try {
-    // If you enabled express.raw above, you’d parse Buffer here.
     const body = req.body ?? {};
 
     // Accept either "queryResult" (preferred) or "result" (older FE)
@@ -326,56 +331,157 @@ app.post("/api/verify/zkpass", async (req, res) => {
       result,
       scope,
       uniqueIdentifier: clientUID,
-      cosmosAddress, // optional: wallet address or user address from FE
-      devMode, // optional: allow FE to toggle mock/dev mode; fallback below
+      devMode,              // optional: FE toggle
+      bech32Address,        // e.g., cosmos1...            // string you asked the wallet to sign (preferred)
     } = body;
 
     const qr = queryResult ?? result;
 
     if (!proofs || !qr || !scope) {
-      return res
-        .status(400)
-        .json({ error: "missing fields", have: Object.keys(body) });
+      return res.status(400).json({ error: "missing fields", have: Object.keys(body) });
     }
 
+    // 1) Verify ZKPassport off-chain
     console.log("🔑 ZKPass client UID:", clientUID);
+    const zk = new ZKPassport(process.env.ZKPASS_DOMAIN || "http://localhost:4173");
+    const { verified, uniqueIdentifier: serverUID, queryResultErrors } = await zk.verify({
+      proofs,
+      queryResult: qr,
+      scope,
+      devMode: typeof devMode === "boolean" ? devMode : true,
+    });
 
-    // Verify with SDK (off-chain)
-    const zk = new ZKPassport(process.env.ZKPASS_DOMAIN || "localhost:4173");
-    const { verified, uniqueIdentifier: serverUID, queryResultErrors } =
-      await zk.verify({
-        proofs,
-        queryResult: qr,
-        scope,
-        devMode: typeof devMode === "boolean" ? devMode : true, // match your FE defaults
-        // validity: 180, // optional: days since last ID scan
-      });
-
-    // Save BEFORE responding (best practice)
-    if (serverUID == clientUID && verified ==  true){
+    // 3) Only persist if BOTH ZK verification and address-signature verification pass
+    if (verified === true && clientUID === serverUID) {
       try {
-        // If your DB helper accepts only (identifier, address), we store (clientUID || serverUID)
-        await saveVerification(clientUID || serverUID, cosmosAddress ?? null, "zkpass");
+        await saveVerification(clientUID || serverUID, bech32Address ?? null, "zkpass");
         console.log("💾 ZKPass verification saved");
       } catch (dbErr) {
         console.error("DB save failed (zkpass):", dbErr);
         // continue anyway
       }
+    }else{
+      console.log("❌ Verification not saved: zkpass verified =", verified, "clientUID === serverUID:", clientUID === serverUID, "addrSigOk =", addrSigOk);
+      return  res.status(400).json({ error: "verification_failed" });
     }
 
     return res.json({
-      status: verified ? "success" : "error",
-      verified,
+      status: verified && addrSigOk ? "success" : "error",
+      verified,              // zkpass verdict
+      addrSigOk,             // cosmos signature/address verdict
       clientUID,
       serverUID,
       match: clientUID ? clientUID === serverUID : null,
       queryResultErrors,
-      address: cosmosAddress ?? null,
+      address: bech32Address ?? null,
       timestamp: new Date().toISOString(),
     });
   } catch (e) {
     console.error("❌ /api/verify/zkpass error:", e?.message || e);
     return res.status(500).json({ error: "verification_failed" });
+  }
+});
+
+
+export async function handleWhiteCheck(req, res) {
+  try {
+    const { recipientAddress } = req.body ?? {};
+    if (typeof recipientAddress !== "string" || recipientAddress.trim() === "") {
+      return res.status(200).json({
+        status: "failed",
+        data: { address: "", whitelisted: false },
+        message: "Pass a valid address",
+      });
+    }
+
+    const whitelisted = await checkAddressExists(recipientAddress.trim());
+
+    return res.status(200).json({
+      status: "success",
+      data: {
+        address: recipientAddress.trim(),
+        whitelisted,
+      },
+      message: whitelisted ? "Address is whitelisted" : "Address is not whitelisted",
+    });
+  } catch (err) {
+    // Preserve exact shape even on DB errors
+    return res.status(500).json({
+      status: "failed",
+      data: { address: "", whitelisted: false },
+      message: err,
+    });
+  }
+}
+
+app.post("/whitelist/check", handleWhiteCheck);
+
+
+//==================================decoding stuff==================================
+
+function b64ToBytes(b64) {
+  return Uint8Array.from(Buffer.from(b64, "base64"));
+}
+
+function extractFirstSecpPubkey(txBytes) {
+  const txRaw = TxRaw.decode(txBytes);
+  if (!txRaw?.authInfoBytes?.length) throw new Error("no auth_info in tx");
+  const auth = AuthInfo.decode(txRaw.authInfoBytes);
+  const any = auth?.signerInfos?.[0]?.publicKey;
+  if (!any) throw new Error("no signer public key found");
+  if (any.typeUrl !== "/cosmos.crypto.secp256k1.PubKey") {
+    throw new Error(`unsupported pubkey type: ${any.typeUrl}`);
+  }
+  const secp = SecpPubKey.decode(any.value);
+  if (!secp?.key?.length) throw new Error("empty secp256k1 key");
+  if (secp.key.length !== 33) throw new Error(`pubkey must be 33 bytes, got ${secp.key.length}`);
+  return secp.key; // Uint8Array
+}
+
+function pubkeyToTwilightAddress(pubkey33) {
+  const addrBytes = rawSecp256k1PubkeyToRawAddress(pubkey33);
+  return bech32.encode("twilight", bech32.toWords(addrBytes));
+}
+
+app.post("/whitelist/status/tx", async (req, res) => {
+  const { jsonrpc, id, method, params } = req.body || {};
+  const reply = (result, error) => {
+    const base = { jsonrpc: "2.0", id: id ?? null };
+    return res.json(error ? { ...base, error } : { ...base, result });
+  };
+
+  try {
+    if (jsonrpc !== "2.0") {
+      return reply(null, { code: -32600, message: "Invalid Request" });
+    }
+    if (method !== "broadcast_tx_sync") {
+      return reply(null, { code: -32601, message: "Method not found" });
+    }
+
+    // Support both object and array params
+    let txB64;
+    if (params && typeof params === "object" && !Array.isArray(params)) {
+      txB64 = params.tx;
+    } else if (Array.isArray(params)) {
+      txB64 = params[0];
+    }
+    if (typeof txB64 !== "string" || !txB64.trim()) {
+      return reply(null, { code: -32602, message: "Invalid params: tx (base64) is required" });
+    }
+
+    // Decode & extract address
+    const txBytes = b64ToBytes(txB64.trim());
+    const pubkey33 = extractFirstSecpPubkey(txBytes);
+    const address = pubkeyToTwilightAddress(pubkey33);
+
+    console.log("Extracted address from tx:", address);
+
+    // Whitelist check
+    const verified = await checkAddressExists(address);
+
+    return reply({ address, verified }, null);
+  } catch (err) {
+    return reply(null, { code: -32000, message: err?.message || String(err) });
   }
 });
 

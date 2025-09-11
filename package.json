@@ -18,9 +18,13 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@cosmjs/amino": "^0.36.0",
     "@selfxyz/core": "^1.0.8",
     "@zkpassport/sdk": "^0.7.1",
+    "bech32": "^2.0.0",
     "cors": "^2.8.5",
+    "cosmjs": "^0.0.1-security",
+    "cosmjs-types": "^0.10.1",
     "dotenv": "^16.0.0",
     "express": "^4.21.2",
     "pg": "^8.16.3"

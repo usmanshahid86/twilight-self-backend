@@ -1,5 +1,8 @@
 // database.mjs
 import { Pool } from "pg";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 // Database configuration
 const pool = new Pool({
@@ -9,6 +12,25 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD || "zkpass",
   port: parseInt(process.env.DB_PORT || "5432", 10),
 });
+
+
+export async function checkAddressExists(address) {
+  if (typeof address !== "string" || address.trim() === "") {
+    throw new Error("address must be a non-empty string");
+  }
+
+  const sql =
+    "SELECT EXISTS(SELECT 1 FROM public.zkpass WHERE address = $1) AS exists";
+  const params = [address];
+
+  try {
+    const { rows } = await pool.query(sql, params);
+    return rows?.[0]?.exists === true;
+  } catch (err) {
+    throw new Error(`failed to check address existence: ${err.message}`);
+  }
+}
+
 
 // Save verification data
 export async function saveVerification(uniqueIdentifier, address, provider) {
