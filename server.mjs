@@ -10,6 +10,7 @@ import {
   AllIds,
   DefaultConfigStore,
 } from "@selfxyz/core";
+import { countries } from "@selfxyz/common";
 
 
 import { createRequire } from "module";
@@ -20,7 +21,13 @@ const { ZKPassport } = require("@zkpassport/sdk");
 // env
 dotenv.config();
 
-const requiredEnvVars = ["SELF_SCOPE", "SELF_PUBLIC_ENDPOINT", "SELF_CALLBACK_URL", "OFAC_CHECK", "EXCLUDED_COUNTRIES"];
+const requiredEnvVars = [
+  "SELF_SCOPE",
+  "SELF_PUBLIC_ENDPOINT",
+  "SELF_CALLBACK_URL",
+  "OFAC_CHECK",
+  "SELF_APAC_ALLOWED",
+];
 const missingEnvVars = requiredEnvVars.filter((k) => !process.env[k]);
 if (missingEnvVars.length > 0) {
   console.error("❌ Missing required environment variables:", missingEnvVars);
@@ -31,13 +38,16 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 // allow your dev origins; add any others you use
-const allowedOrigins = [
-  "http://localhost:4173",
-  "http://localhost:5173",
-  "http://localhost:3000",
+const defaultOrigins = [
   "http://localhost:3001",
 ];
 
+const additionalOrigins = process.env.ADDITIONAL_CORS_ORIGINS
+  ? process.env.ADDITIONAL_CORS_ORIGINS.split(",")
+  : [];
+
+const allowedOrigins = [...defaultOrigins, ...additionalOrigins];
+console.log("🔍 Allowed Origins:", allowedOrigins);
 const corsMw = cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true); // allow curl/server-to-server
@@ -71,27 +81,50 @@ app.use((req, _res, next) => {
   next();
 });
 
+function buildExcludedCountriesFromEnv() {
+  const raw = process.env.SELF_APAC_ALLOWED;
+  let allowed;
+  try {
+    allowed = JSON.parse(raw);
+  } catch (e) {
+    throw new Error("SELF_APAC_ALLOWED is not valid JSON");
+  }
+  if (!Array.isArray(allowed) || !allowed.every((x) => typeof x === "string")) {
+    throw new Error("SELF_APAC_ALLOWED must be a JSON array of ISO-3 strings");
+  }
+
+  // Self's canonical ISO-3 list
+  const allSelfCodes = Object.values(countries);
+
+  // Drop any codes in the env that Self doesn't recognize
+  const allowedSet = new Set(
+    allowed.filter((code) => {
+      const ok = allSelfCodes.includes(code);
+      if (!ok)
+        console.warn(
+          `[Self] Ignoring unsupported ISO-3 code in SELF_APAC_ALLOWED: ${code}`
+        );
+      return ok;
+    })
+  );
+
+  // Everything NOT allowed becomes excluded
+  const excluded = allSelfCodes.filter((code) => !allowedSet.has(code));
+  return excluded;
+}
+
+
 // ---------------------------
 // Self Protocol configuration
 // ---------------------------
 const verification_config = {
-  excludedCountries: (() => {
-    try {
-      return process.env.EXCLUDED_COUNTRIES
-        ? JSON.parse(process.env.EXCLUDED_COUNTRIES)
-        : [];
-    } catch (e) {
-      console.warn(
-        "❌ Failed to parse EXCLUDED_COUNTRIES, using empty array:",
-        e.message
-      );
-      return [];
-    }
-  })(),
+  excludedCountries: buildExcludedCountriesFromEnv(),
   // Converting OFAC_CHECK to boolean from string. False by default.
   ofac: process.env.OFAC_CHECK === "true" || false,
   // minimumAge intentionally omitted
 };
+
+console.log("🔍 Excluded Countries:", verification_config.excludedCountries);
 
 let selfBackendVerifier = null;
 try {
@@ -109,7 +142,7 @@ try {
   console.log("📋 Configuration:", {
     scope: process.env.SELF_SCOPE || "twilight-relayer-passport",
     isMock: process.env.SELF_MOCK_MODE === "true",
-    config: verification_config,
+    config: configStore,
   });
 } catch (err) {
   console.error("❌ Failed to initialize Self Backend Verifier:", err);
@@ -127,6 +160,40 @@ app.get("/health", (_req, res) => {
     environment: process.env.NODE_ENV || "development",
   });
 });
+
+app.get("/disclosures", (_req, res) => {
+  try {
+    // Create the disclosure configuration object
+    const disclosures = {
+        // Identity verification settings
+        ofac: process.env.OFAC_CHECK === "true" || false,
+        excludedCountries: verification_config.excludedCountries,
+
+        // Optional disclosure settings
+        nationality: false,
+        gender: false,
+        date_of_birth: false,
+        passport_number: false,
+        expiry_date: true,
+        issuing_state: false,
+        name: false,
+    };
+
+    res.json({
+      status: "success",
+      data: disclosures,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("❌ Error fetching disclosure config:", error);
+    res.status(500).json({
+      status: "error",
+      message: error?.message || "Failed to fetch disclosure configuration",
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
 
 // ---------------------------------------------
 // Self Protocol verification endpoint (existing)
