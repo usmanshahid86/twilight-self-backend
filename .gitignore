@@ -34,3 +34,6 @@ coverage/
 # Misc
 .tmp/
 .temp/
+
+# Exclude utils/list_extaction.mjs scratch code 
+utils/list_extaction.mjs

@@ -12,8 +12,8 @@ import {
 } from "@selfxyz/core";
 import { countries } from "@selfxyz/common";
 
-
 import { createRequire } from "module";
+import { extractWalletAddress } from "./utils/selfUserData.mjs";
 const require = createRequire(import.meta.url);
 // Prefer the package entry if it resolves to CJS; otherwise target the cjs build directly:
 const { ZKPassport } = require("@zkpassport/sdk");
@@ -27,6 +27,7 @@ const requiredEnvVars = [
   "SELF_CALLBACK_URL",
   "OFAC_CHECK",
   "SELF_APAC_ALLOWED",
+  "SELF_EXCLUDED_COUNTRIES",
 ];
 const missingEnvVars = requiredEnvVars.filter((k) => !process.env[k]);
 if (missingEnvVars.length > 0) {
@@ -81,36 +82,45 @@ app.use((req, _res, next) => {
   next();
 });
 
-function buildExcludedCountriesFromEnv() {
-  const raw = process.env.SELF_APAC_ALLOWED;
-  let allowed;
+
+
+function getExcludedCountries() {
   try {
-    allowed = JSON.parse(raw);
+    return process.env.SELF_EXCLUDED_COUNTRIES
+      ? JSON.parse(process.env.SELF_EXCLUDED_COUNTRIES)
+      : [];
   } catch (e) {
-    throw new Error("SELF_APAC_ALLOWED is not valid JSON");
+    console.warn(
+      "❌ Failed to parse EXCLUDED_COUNTRIES, using empty array:",
+      e.message
+    );
+    return [];
   }
-  if (!Array.isArray(allowed) || !allowed.every((x) => typeof x === "string")) {
-    throw new Error("SELF_APAC_ALLOWED must be a JSON array of ISO-3 strings");
-  }
+};
+const excludedCountries = getExcludedCountries();
+ 
+function getAllowedCountries() {
+  return process.env.SELF_APAC_ALLOWED
+    ? JSON.parse(process.env.SELF_APAC_ALLOWED)
+    : [];
+}
+const allowedCountries = getAllowedCountries();
 
-  // Self's canonical ISO-3 list
-  const allSelfCodes = Object.values(countries);
-
-  // Drop any codes in the env that Self doesn't recognize
-  const allowedSet = new Set(
-    allowed.filter((code) => {
-      const ok = allSelfCodes.includes(code);
-      if (!ok)
-        console.warn(
-          `[Self] Ignoring unsupported ISO-3 code in SELF_APAC_ALLOWED: ${code}`
-        );
-      return ok;
-    })
-  );
-
-  // Everything NOT allowed becomes excluded
-  const excluded = allSelfCodes.filter((code) => !allowedSet.has(code));
-  return excluded;
+// create a function to create properly typed disclosure config
+function getDisclosureConfig() {
+  return {
+    // All fields are optional according to SelfAppDisclosureConfig interface
+    issuing_state: true,
+    name: false,
+    passport_number: false,
+    nationality: false,
+    date_of_birth: false,
+    gender: false,
+    expiry_date: true,
+    ofac: process.env.OFAC_CHECK === "true" || false,
+    excludedCountries: excludedCountries,
+   // minimumAge: undefined, // Optional, omit if not needed
+  };
 }
 
 
@@ -118,7 +128,8 @@ function buildExcludedCountriesFromEnv() {
 // Self Protocol configuration
 // ---------------------------
 const verification_config = {
-  excludedCountries: buildExcludedCountriesFromEnv(),
+  //excludedCountries: buildExcludedCountriesFromEnv(),
+  excludedCountries: excludedCountries,//getExcludedCountries(),
   // Converting OFAC_CHECK to boolean from string. False by default.
   ofac: process.env.OFAC_CHECK === "true" || false,
   // minimumAge intentionally omitted
@@ -164,24 +175,11 @@ app.get("/health", (_req, res) => {
 app.get("/disclosures", (_req, res) => {
   try {
     // Create the disclosure configuration object
-    const disclosures = {
-        // Identity verification settings
-        ofac: process.env.OFAC_CHECK === "true" || false,
-        excludedCountries: verification_config.excludedCountries,
-
-        // Optional disclosure settings
-        nationality: false,
-        gender: false,
-        date_of_birth: false,
-        passport_number: false,
-        expiry_date: true,
-        issuing_state: false,
-        name: false,
-    };
-
+    const disclosureConfig = getDisclosureConfig();
+    console.log("🔍 Sending disclosure config:", disclosureConfig);
     res.json({
       status: "success",
-      data: disclosures,
+      data: disclosureConfig,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
@@ -242,7 +240,6 @@ app.post("/api/verify", async (req, res) => {
       const isExpiryValid = expiryDate > oneYearFromNow;
 
       // 2b. Check if the document is from an allowed country
-      const allowedCountries = ["CHN", "IDN", "MYS", "USA"];
       const issuingCountry = result.discloseOutput.issuingState;
       const isCountryAllowed = allowedCountries.includes(issuingCountry);
 
@@ -261,23 +258,33 @@ app.post("/api/verify", async (req, res) => {
           ? "✅ Document is from an allowed country"
           : "❌ Document is not from an allowed country",
       });
-
+  //    verify if document is expired and the country is allowed
+      if (!isExpiryValid || !isCountryAllowed) {
+        return res.status(400).json({
+          status: "error",
+          result: false,
+          message: "Document is expired or not from an allowed country",
+          details: result.isValidDetails,
+          timestamp: new Date().toISOString(),
+        });
+      }
       // Save BEFORE responding (fixes prior pattern)
       try {
         // If your DB helper accepts only (identifier, address), use attestationId + cosmosAddress.
         // If you extended it to accept a provider, pass 'self' as third param.
         await saveSelfCheck(result.userData?.userIdentifier, proof);
         console.log("💾 Self check saved");
-        // Decode the hex-encoded cosmos address from userDefinedData
-        const cosmosAddress = Buffer.from(
-          result.userData?.userDefinedData,
-          "hex"
-        ).toString("utf8");
-        console.log("Decoded cosmos address:", cosmosAddress);
-        // validation of cosmos address before saving
-        if (!cosmosAddress.startsWith("twilight")) {
-          throw new Error("Invalid cosmos address format");
-        }
+        const cosmosAddress = extractWalletAddress(
+           result.userData?.userDefinedData
+         );
+
+         if (!cosmosAddress) {
+           return res
+             .status(400)
+             .json({ error: "Invalid or missing Twilight wallet address" });
+         }
+
+        console.log("✅ Extracted wallet:", cosmosAddress);
 
         // Save to zkpass table with provider as 'self'
         const savedRecord = await saveVerification(
@@ -316,60 +323,6 @@ app.post("/api/verify", async (req, res) => {
     }
   } catch (error) {
     console.error("❌ Self Protocol Verification error:", error);
-    return res.status(500).json({
-      status: "error",
-      message: error?.message || "Internal server error",
-      timestamp: new Date().toISOString(),
-    });
-  }
-});
-
-app.post("/api/verify/self", async (req, res) => {
-  try {
-    console.log("📨 Received Self verification request:", req.body);
-    
-    const { cosmosAddress, uuid } = req.body;
-    
-    // Validate required fields
-    if (!cosmosAddress || !uuid) {
-      return res.status(400).json({
-        status: "error",
-        message: "cosmosAddress and attestationId are required",
-        timestamp: new Date().toISOString(),
-      });
-    }
-    
-    console.log("🔍 Checking if attestation ID exists:", uuid);
-    
-    // Check if attestation ID exists in selfcheck table
-    const attestationExists = await checkAttestationExists(uuid);
-    
-    if (!attestationExists) {
-      console.log("❌ Attestation ID not found in selfcheck table");
-      return res.status(404).json({
-        status: "error",
-        message: "Attestation ID not found in selfcheck table",
-        uuid,
-        timestamp: new Date().toISOString(),
-      });
-    }
-    
-    console.log("✅ Attestation ID found, saving to zkpass table");
-    
-    // Save to zkpass table with provider as 'self'
-    const savedRecord = await saveVerification(uuid, cosmosAddress, 'self');
-    
-    console.log("💾 Data saved successfully:", savedRecord);
-    
-    return res.json({
-      status: "success",
-      message: "Verification data saved successfully",
-      data: savedRecord,
-      timestamp: new Date().toISOString(),
-    });
-    
-  } catch (error) {
-    console.error("❌ /api/verify/self error:", error);
     return res.status(500).json({
       status: "error",
       message: error?.message || "Internal server error",
