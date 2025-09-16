@@ -10,6 +10,24 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT || "5432", 10),
 });
 
+// Check if the address exists in zkpass table
+export async function checkAddressExists(address) {
+  if (typeof address !== "string" || address.trim() === "") {
+    throw new Error("address must be a non-empty string");
+  }
+
+  const sql =
+    "SELECT EXISTS(SELECT 1 FROM public.zkpass WHERE address = $1) AS exists";
+  const params = [address];
+
+  try {
+    const { rows } = await pool.query(sql, params);
+    return rows?.[0]?.exists === true;
+  } catch (err) {
+    throw new Error(`failed to check address existence: ${err.message}`);
+  }
+}
+
 // Save verification data
 export async function saveVerification(uniqueIdentifier, address, provider) {
   try {

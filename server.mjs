@@ -1,37 +1,43 @@
 /**
  * Self + ZKPassport Backend Server (ESM)
  */
-import { saveVerification, checkAttestationExists, saveSelfCheck } from "./database.mjs";
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
 import {
-  SelfBackendVerifier,
-  AllIds,
-  DefaultConfigStore,
-} from "@selfxyz/core";
-import { countries } from "@selfxyz/common";
+  saveVerification,
+  checkAttestationExists,
+  saveSelfCheck,
+  checkAddressExists,
+} from './database.mjs';
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import { SelfBackendVerifier, AllIds, DefaultConfigStore } from '@selfxyz/core';
+import { countries } from '@selfxyz/common';
 
-import { createRequire } from "module";
-import { extractWalletAddress } from "./utils/selfUserData.mjs";
+import { createRequire } from 'module';
+import { extractWalletAddress } from './utils/selfUserData.mjs';
+import {
+  b64ToBytes,
+  extractFirstSecpPubkey,
+  pubkeyToTwilightAddress,
+} from './utils/decodeTx.mjs';
 const require = createRequire(import.meta.url);
 // Prefer the package entry if it resolves to CJS; otherwise target the cjs build directly:
-const { ZKPassport } = require("@zkpassport/sdk");
+const { ZKPassport } = require('@zkpassport/sdk');
 
 // env
 dotenv.config();
 
 const requiredEnvVars = [
-  "SELF_SCOPE",
-  "SELF_PUBLIC_ENDPOINT",
-  "SELF_CALLBACK_URL",
-  "OFAC_CHECK",
-  "SELF_APAC_ALLOWED",
-  "SELF_EXCLUDED_COUNTRIES",
+  'SELF_SCOPE',
+  'SELF_PUBLIC_ENDPOINT',
+  'SELF_CALLBACK_URL',
+  'OFAC_CHECK',
+  'SELF_APAC_ALLOWED',
+  'SELF_EXCLUDED_COUNTRIES',
 ];
 const missingEnvVars = requiredEnvVars.filter((k) => !process.env[k]);
 if (missingEnvVars.length > 0) {
-  console.error("❌ Missing required environment variables:", missingEnvVars);
+  console.error('❌ Missing required environment variables:', missingEnvVars);
   process.exit(1);
 }
 
@@ -39,50 +45,42 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 // allow your dev origins; add any others you use
-const defaultOrigins = [
-  "http://localhost:3001",
-];
+const defaultOrigins = ['http://localhost:3001'];
 
 const additionalOrigins = process.env.ADDITIONAL_CORS_ORIGINS
-  ? process.env.ADDITIONAL_CORS_ORIGINS.split(",")
+  ? process.env.ADDITIONAL_CORS_ORIGINS.split(',')
   : [];
 
 const allowedOrigins = [...defaultOrigins, ...additionalOrigins];
-console.log("🔍 Allowed Origins:", allowedOrigins);
+console.log('🔍 Allowed Origins:', allowedOrigins);
 const corsMw = cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true); // allow curl/server-to-server
     cb(null, allowedOrigins.includes(origin));
   },
-  credentials: false,                       // you aren't sending cookies/Authorization
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: [
-    'Content-Type',
-    'ngrok-skip-browser-warning',
-    'Accept'
-  ],
+  credentials: false, // you aren't sending cookies/Authorization
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'ngrok-skip-browser-warning', 'Accept'],
   maxAge: 86400,
 });
 
-app.use(corsMw);                             // attach globally
-app.options("/api/verify/zkpass", corsMw);   // <-- explicit preflight handler
-app.options("/api/verify", corsMw);  
+app.use(corsMw); // attach globally
+app.options('/api/verify/zkpass', corsMw); // <-- explicit preflight handler
+app.options('/api/verify', corsMw);
 
 // generous body limits (zk proofs can be large)
-app.use(express.json({ limit: "50mb", type: "application/json" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+app.use(express.json({ limit: '50mb', type: 'application/json' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // size logger
 app.use((req, _res, next) => {
-  const len = req.headers["content-length"];
+  const len = req.headers['content-length'];
   console.log(
     `Incoming ${req.method} ${req.url} ` +
-      (len ? `content-length=${len}` : "(chunked/unknown)")
+      (len ? `content-length=${len}` : '(chunked/unknown)'),
   );
   next();
 });
-
-
 
 function getExcludedCountries() {
   try {
@@ -91,18 +89,16 @@ function getExcludedCountries() {
       : [];
   } catch (e) {
     console.warn(
-      "❌ Failed to parse EXCLUDED_COUNTRIES, using empty array:",
-      e.message
+      '❌ Failed to parse EXCLUDED_COUNTRIES, using empty array:',
+      e.message,
     );
     return [];
   }
-};
+}
 const excludedCountries = getExcludedCountries();
- 
+
 function getAllowedCountries() {
-  return process.env.SELF_APAC_ALLOWED
-    ? JSON.parse(process.env.SELF_APAC_ALLOWED)
-    : [];
+  return process.env.SELF_APAC_ALLOWED ? JSON.parse(process.env.SELF_APAC_ALLOWED) : [];
 }
 const allowedCountries = getAllowedCountries();
 
@@ -117,103 +113,101 @@ function getDisclosureConfig() {
     date_of_birth: false,
     gender: false,
     expiry_date: true,
-    ofac: process.env.OFAC_CHECK === "true" || false,
+    ofac: process.env.OFAC_CHECK === 'true' || false,
     excludedCountries: excludedCountries,
-   // minimumAge: undefined, // Optional, omit if not needed
+    // minimumAge: undefined, // Optional, omit if not needed
   };
 }
-
 
 // ---------------------------
 // Self Protocol configuration
 // ---------------------------
 const verification_config = {
   //excludedCountries: buildExcludedCountriesFromEnv(),
-  excludedCountries: excludedCountries,//getExcludedCountries(),
+  excludedCountries: excludedCountries, //getExcludedCountries(),
   // Converting OFAC_CHECK to boolean from string. False by default.
-  ofac: process.env.OFAC_CHECK === "true" || false,
+  ofac: process.env.OFAC_CHECK === 'true' || false,
   // minimumAge intentionally omitted
 };
 
-console.log("🔍 Excluded Countries:", verification_config.excludedCountries);
+console.log('🔍 Excluded Countries:', verification_config.excludedCountries);
 
 let selfBackendVerifier = null;
 try {
-  console.log("🚀 Initializing Self Protocol Backend Verifier...");
+  console.log('🚀 Initializing Self Protocol Backend Verifier...');
   const configStore = new DefaultConfigStore(verification_config);
   selfBackendVerifier = new SelfBackendVerifier(
-    process.env.SELF_SCOPE || "twilight-relayer-passport",
+    process.env.SELF_SCOPE || 'twilight-relayer-passport',
     process.env.SELF_PUBLIC_ENDPOINT,
-    process.env.SELF_MOCK_MODE === "true",
+    process.env.SELF_MOCK_MODE === 'true',
     AllIds, // accept all doc types
     configStore,
-    "uuid" // "hex" for addresses, "uuid" for UUIDs
+    'uuid', // "hex" for addresses, "uuid" for UUIDs
   );
-  console.log("✅ Self Backend Verifier initialized");
-  console.log("📋 Configuration:", {
-    scope: process.env.SELF_SCOPE || "twilight-relayer-passport",
-    isMock: process.env.SELF_MOCK_MODE === "true",
+  console.log('✅ Self Backend Verifier initialized');
+  console.log('📋 Configuration:', {
+    scope: process.env.SELF_SCOPE || 'twilight-relayer-passport',
+    isMock: process.env.SELF_MOCK_MODE === 'true',
     config: configStore,
   });
 } catch (err) {
-  console.error("❌ Failed to initialize Self Backend Verifier:", err);
+  console.error('❌ Failed to initialize Self Backend Verifier:', err);
 }
 
 // ----------
 // Healthcheck
 // ----------
-app.get("/health", (_req, res) => {
+app.get('/health', (_req, res) => {
   res.json({
-    status: "ok",
-    message: "Backend running",
+    status: 'ok',
+    message: 'Backend running',
     timestamp: new Date().toISOString(),
     verifierReady: selfBackendVerifier !== null,
-    environment: process.env.NODE_ENV || "development",
+    environment: process.env.NODE_ENV || 'development',
   });
 });
 
-app.get("/disclosures", (_req, res) => {
+app.get('/disclosures', (_req, res) => {
   try {
     // Create the disclosure configuration object
     const disclosureConfig = getDisclosureConfig();
-    console.log("🔍 Sending disclosure config:", disclosureConfig);
+    console.log('🔍 Sending disclosure config:', disclosureConfig);
     res.json({
-      status: "success",
+      status: 'success',
       data: disclosureConfig,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("❌ Error fetching disclosure config:", error);
+    console.error('❌ Error fetching disclosure config:', error);
     res.status(500).json({
-      status: "error",
-      message: error?.message || "Failed to fetch disclosure configuration",
+      status: 'error',
+      message: error?.message || 'Failed to fetch disclosure configuration',
       timestamp: new Date().toISOString(),
     });
   }
 });
 
-
 // ---------------------------------------------
 // Self Protocol verification endpoint (existing)
 // ---------------------------------------------
-app.post("/api/verify", async (req, res) => {
+app.post('/api/verify', async (req, res) => {
   try {
-    if (req.method === "OPTIONS") return res.sendStatus(200);
+    if (req.method === 'OPTIONS') return res.sendStatus(200);
 
-    console.log("📨 Received Self verification request:", req.body);
-    if (!selfBackendVerifier) throw new Error("Self Backend Verifier not initialized");
+    console.log('📨 Received Self verification request:', req.body);
+    if (!selfBackendVerifier) throw new Error('Self Backend Verifier not initialized');
 
-    const { attestationId, proof, publicSignals, userContextData} = req.body;
+    const { attestationId, proof, publicSignals, userContextData } = req.body;
 
     if (!proof || !publicSignals || !attestationId || !userContextData) {
       return res.status(400).json({
-        status: "error",
+        status: 'error',
         message:
-          "Proof, publicSignals, attestationId, and userContextData are required",
+          'Proof, publicSignals, attestationId, and userContextData are required',
       });
     }
 
-    console.log("🔍 Verifying via Self SDK...", {
+    console.log('🔍 Verifying via Self SDK...', {
       attestationId,
       proofLength: JSON.stringify(proof).length,
       publicSignalsLength: publicSignals.length,
@@ -224,14 +218,14 @@ app.post("/api/verify", async (req, res) => {
       attestationId,
       proof,
       publicSignals,
-      userContextData
+      userContextData,
     );
 
-    console.log("✅ Self verification result:", result);
+    console.log('✅ Self verification result:', result);
 
     if (result.isValidDetails.isValid) {
       // 1. Extract and log user identifier
-      console.log("👤 User Identifier:", result.userData.userIdentifier);
+      console.log('👤 User Identifier:', result.userData.userIdentifier);
 
       // 2a. Check expiry date of the Passport/ ID document
       const expiryDate = new Date(result.discloseOutput.expiryDate);
@@ -243,27 +237,27 @@ app.post("/api/verify", async (req, res) => {
       const issuingCountry = result.discloseOutput.issuingState;
       const isCountryAllowed = allowedCountries.includes(issuingCountry);
 
-      console.log("📅 Document Expiry:", {
+      console.log('📅 Document Expiry:', {
         //expiryDate: expiryDate.toISOString().split("T")[0],
         hasOneYearValidity: isExpiryValid,
         message: isExpiryValid
-          ? "✅ Document has more than 1 year validity"
-          : "❌ Document expires within 1 year",
+          ? '✅ Document has more than 1 year validity'
+          : '❌ Document expires within 1 year',
       });
 
-      console.log("🌍 Issuing country:", {
+      console.log('🌍 Issuing country:', {
         country: issuingCountry,
         isAllowed: isCountryAllowed,
         message: isCountryAllowed
-          ? "✅ Document is from an allowed country"
-          : "❌ Document is not from an allowed country",
+          ? '✅ Document is from an allowed country'
+          : '❌ Document is not from an allowed country',
       });
-  //    verify if document is expired and the country is allowed
+      //    verify if document is expired and the country is allowed
       if (!isExpiryValid || !isCountryAllowed) {
         return res.status(400).json({
-          status: "error",
+          status: 'error',
           result: false,
-          message: "Document is expired or not from an allowed country",
+          message: 'Document is expired or not from an allowed country',
           details: result.isValidDetails,
           timestamp: new Date().toISOString(),
         });
@@ -273,59 +267,57 @@ app.post("/api/verify", async (req, res) => {
         // If your DB helper accepts only (identifier, address), use attestationId + cosmosAddress.
         // If you extended it to accept a provider, pass 'self' as third param.
         await saveSelfCheck(result.userData?.userIdentifier, proof);
-        console.log("💾 Self check saved");
-        const cosmosAddress = extractWalletAddress(
-           result.userData?.userDefinedData
-         );
+        console.log('💾 Self check saved');
+        const cosmosAddress = extractWalletAddress(result.userData?.userDefinedData);
 
-         if (!cosmosAddress) {
-           return res
-             .status(400)
-             .json({ error: "Invalid or missing Twilight wallet address" });
-         }
+        if (!cosmosAddress) {
+          return res
+            .status(400)
+            .json({ error: 'Invalid or missing Twilight wallet address' });
+        }
 
-        console.log("✅ Extracted wallet:", cosmosAddress);
+        console.log('✅ Extracted wallet:', cosmosAddress);
 
         // Save to zkpass table with provider as 'self'
         const savedRecord = await saveVerification(
           result.userData?.userIdentifier,
           cosmosAddress,
-          "self"
+          'self',
         );
-        console.log("uuid:", result.userData?.userIdentifier);
+        console.log('uuid:', result.userData?.userIdentifier);
 
-        console.log("💾 Data saved successfully:", savedRecord);
+        console.log('💾 Data saved successfully:', savedRecord);
       } catch (dbErr) {
-        console.error("DB save failed (self):", dbErr);
+        console.error('DB save failed (self):', dbErr);
         // continue anyway
       }
       const response = {
-        status: "success",
-        message: "Verification completed",
+        status: 'success',
+        message: 'Verification completed',
         result: true,
         details: result.isValidDetails,
         timestamp: new Date().toISOString(),
       };
 
-      console.log("🎉 Verification successful!");
+      console.log('🎉 Verification successful!');
       res.json(response);
     } else {
-      // Verification check failed 
+      // Verification check failed
       const response = {
-        status: "error",
+        status: 'error',
         result: false,
-        message: "Verification failed",
+        message: 'Verification failed',
         details: result.isValidDetails,
         timestamp: new Date().toISOString(),
       };
-      console.log("❌ Self verification failed:", response);
+      console.log('❌ Self verification failed:', response);
       return res.status(400).json(response);
     }
   } catch (error) {
-    console.error("❌ Self Protocol Verification error:", error);
+    console.error('❌ Self Protocol Verification error:', error);
     return res.status(500).json({
-      status: "error",
-      message: error?.message || "Internal server error",
+      status: 'error',
+      message: error?.message || 'Internal server error',
       timestamp: new Date().toISOString(),
     });
   }
@@ -334,7 +326,7 @@ app.post("/api/verify", async (req, res) => {
 // ----------------------------------------
 // NEW: ZKPassport verification endpoint
 // ----------------------------------------
-app.post("/api/verify/zkpass", async (req, res) => {
+app.post('/api/verify/zkpass', async (req, res) => {
   try {
     // If you enabled express.raw above, you’d parse Buffer here.
     const body = req.body ?? {};
@@ -353,38 +345,39 @@ app.post("/api/verify/zkpass", async (req, res) => {
     const qr = queryResult ?? result;
 
     if (!proofs || !qr || !scope) {
-      return res
-        .status(400)
-        .json({ error: "missing fields", have: Object.keys(body) });
+      return res.status(400).json({ error: 'missing fields', have: Object.keys(body) });
     }
 
-    console.log("🔑 ZKPass client UID:", clientUID);
+    console.log('🔑 ZKPass client UID:', clientUID);
 
     // Verify with SDK (off-chain)
-    const zk = new ZKPassport(process.env.ZKPASS_DOMAIN || "localhost:4173");
-    const { verified, uniqueIdentifier: serverUID, queryResultErrors } =
-      await zk.verify({
-        proofs,
-        queryResult: qr,
-        scope,
-        devMode: typeof devMode === "boolean" ? devMode : true, // match your FE defaults
-        // validity: 180, // optional: days since last ID scan
-      });
+    const zk = new ZKPassport(process.env.ZKPASS_DOMAIN || 'localhost:4173');
+    const {
+      verified,
+      uniqueIdentifier: serverUID,
+      queryResultErrors,
+    } = await zk.verify({
+      proofs,
+      queryResult: qr,
+      scope,
+      devMode: typeof devMode === 'boolean' ? devMode : true, // match your FE defaults
+      // validity: 180, // optional: days since last ID scan
+    });
 
     // Save BEFORE responding (best practice)
-    if (serverUID == clientUID && verified ==  true){
+    if (serverUID == clientUID && verified == true) {
       try {
         // If your DB helper accepts only (identifier, address), we store (clientUID || serverUID)
-        await saveVerification(clientUID || serverUID, cosmosAddress ?? null, "zkpass");
-        console.log("💾 ZKPass verification saved");
+        await saveVerification(clientUID || serverUID, cosmosAddress ?? null, 'zkpass');
+        console.log('💾 ZKPass verification saved');
       } catch (dbErr) {
-        console.error("DB save failed (zkpass):", dbErr);
+        console.error('DB save failed (zkpass):', dbErr);
         // continue anyway
       }
     }
 
     return res.json({
-      status: verified ? "success" : "error",
+      status: verified ? 'success' : 'error',
       verified,
       clientUID,
       serverUID,
@@ -394,18 +387,102 @@ app.post("/api/verify/zkpass", async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (e) {
-    console.error("❌ /api/verify/zkpass error:", e?.message || e);
-    return res.status(500).json({ error: "verification_failed" });
+    console.error('❌ /api/verify/zkpass error:', e?.message || e);
+    return res.status(500).json({ error: 'verification_failed' });
   }
 });
 
-// start server
+// ----------------------------------------
+// Twilight whitelist address check endpoint
+// ----------------------------------------
+app.post('/api/verify/whitelist', async (req, res) => {
+  try {
+    const { recipientAddress } = req.body ?? {};
+    if (typeof recipientAddress !== 'string' || recipientAddress.trim() === '') {
+      return res.status(200).json({
+        status: 'failed',
+        data: { address: '', whitelisted: false },
+        message: 'Invalid address format',
+      });
+    }
+
+    const whitelisted = await checkAddressExists(recipientAddress.trim());
+
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        address: recipientAddress.trim(),
+        whitelisted,
+      },
+      message: whitelisted ? 'Address is whitelisted' : 'Address is not whitelisted',
+    });
+  } catch (err) {
+    // Preserve exact shape even on DB errors
+    return res.status(500).json({
+      status: 'failed',
+      data: { address: '', whitelisted: false },
+      message: err,
+    });
+  }
+});
+
+// ----------------------------------------
+// Twilight whitelist address check endpoint
+// ----------------------------------------
+app.post('/whitelist/status/tx', async (req, res) => {
+  const { jsonrpc, id, method, params } = req.body || {};
+  const reply = (result, error) => {
+    const base = { jsonrpc: '2.0', id: id ?? null };
+    return res.json(error ? { ...base, error } : { ...base, result });
+  };
+
+  try {
+    if (jsonrpc !== '2.0') {
+      return reply(null, { code: -32600, message: 'Invalid Request' });
+    }
+    if (method !== 'broadcast_tx_sync') {
+      return reply(null, { code: -32601, message: 'Method not found' });
+    }
+
+    // Support both object and array params
+    let txB64;
+    if (params && typeof params === 'object' && !Array.isArray(params)) {
+      txB64 = params.tx;
+    } else if (Array.isArray(params)) {
+      txB64 = params[0];
+    }
+    if (typeof txB64 !== 'string' || !txB64.trim()) {
+      return reply(null, {
+        code: -32602,
+        message: 'Invalid params: tx (base64) is required',
+      });
+    }
+
+    // Decode & extract address
+    const txBytes = b64ToBytes(txB64.trim());
+    const pubkey33 = extractFirstSecpPubkey(txBytes);
+    const address = pubkeyToTwilightAddress(pubkey33);
+
+    console.log('Extracted address from tx:', address);
+
+    // Whitelist check
+    const verified = await checkAddressExists(address);
+
+    return reply({ address, verified }, null);
+  } catch (err) {
+    return reply(null, { code: -32000, message: err?.message || String(err) });
+  }
+});
+
+// ----------------------------------------
+// Start server
+// ----------------------------------------
 app.listen(port, () => {
-  console.log("🚀 Backend Server started");
+  console.log('🚀 Backend Server started');
   console.log(`📡 Public endpoint: ${process.env.SELF_PUBLIC_ENDPOINT}`);
   console.log(`🔍 Self callback:  ${process.env.SELF_CALLBACK_URL}`);
-  console.log(`🔧 Env:           ${process.env.NODE_ENV || "development"}`);
-  console.log(`🔧 Scope:         "${process.env.SELF_SCOPE }"`);
+  console.log(`🔧 Env:           ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔧 Scope:         "${process.env.SELF_SCOPE}"`);
 });
 
 export default app;
