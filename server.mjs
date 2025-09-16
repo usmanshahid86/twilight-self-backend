@@ -228,21 +228,29 @@ app.post('/api/verify', async (req, res) => {
       console.log('👤 User Identifier:', result.userData.userIdentifier);
 
       // 2a. Check expiry date of the Passport/ ID document
-      const expiryDate = new Date(result.discloseOutput.expiryDate);
-      const oneYearFromNow = new Date();
-      oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
-      const isExpiryValid = expiryDate > oneYearFromNow;
+      const expiryDateStr = result.discloseOutput.expiryDate; // '300911'
+      // Parse YYMMDD format
+      const year = 2000 + parseInt(expiryDateStr.substring(0, 2)); // 2030
+      const month = parseInt(expiryDateStr.substring(2, 4)) - 1; // 09-1=8 (months are 0-based)
+      const day = parseInt(expiryDateStr.substring(4, 6)); // 11
+      const expiryDate = new Date(year, month, day);
+
+      const sixMonthsFromNow = new Date();
+      sixMonthsFromNow.setMonth(sixMonthsFromNow.getMonth() + 6); // Add 6 months instead of a year
+      const isExpiryValid = expiryDate > sixMonthsFromNow;
 
       // 2b. Check if the document is from an allowed country
       const issuingCountry = result.discloseOutput.issuingState;
       const isCountryAllowed = allowedCountries.includes(issuingCountry);
 
       console.log('📅 Document Expiry:', {
-        //expiryDate: expiryDate.toISOString().split("T")[0],
-        hasOneYearValidity: isExpiryValid,
+        expiryDateStr,
+        parsedDate: expiryDate.toISOString(),
+        sixMonthsFromNow: sixMonthsFromNow.toISOString(),
+        hasValidityPeriod: isExpiryValid,
         message: isExpiryValid
-          ? '✅ Document has more than 1 year validity'
-          : '❌ Document expires within 1 year',
+          ? '✅ Document has more than 6 months validity'
+          : '❌ Document expires within 6 months',
       });
 
       console.log('🌍 Issuing country:', {
