@@ -35,11 +35,17 @@ export async function checkAddressExists(address) {
 // Save verification data
 export async function saveVerification(uniqueIdentifier, address, provider) {
   try {
+    if (await checkAddressExists(address)) {
+      console.log("Address already exists:", address);
+      return null; // or handle as needed
+    }
+
+    const nowUTC = new Date().toISOString();
     const result = await pool.query(
-      `INSERT INTO zkpass (address, identifier, provider)
-       VALUES ($1, $2, $3)
+      `INSERT INTO zkpass (address, identifier, provider, createdAt)
+       VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [address, uniqueIdentifier, provider] // address -> $1, uniqueIdentifier -> $2, provider -> $3
+      [address, uniqueIdentifier, provider, nowUTC]
     );
     return result.rows[0];
   } catch (error) {

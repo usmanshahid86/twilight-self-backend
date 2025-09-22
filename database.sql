@@ -20,7 +20,7 @@ Create database zkpass;
 \c zkpass
 
 CREATE TABLE public.zkpass (
-    address text NOT NULL,
+    address text PRIMARY KEY,
     identifier text NOT NULL,
     provider text NOT NULL,
     createdAt timestamp with time zone DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
