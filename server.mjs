@@ -11,7 +11,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { SelfBackendVerifier, AllIds, DefaultConfigStore } from '@selfxyz/core';
-import { countries } from '@selfxyz/common';
+//import { countries } from '@selfxyz/common';
 
 import { createRequire } from 'module';
 import { extractWalletAddress } from './utils/selfUserData.mjs';
