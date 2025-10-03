@@ -139,7 +139,7 @@ try {
   selfBackendVerifier = new SelfBackendVerifier(
     process.env.SELF_SCOPE || 'twilight-relayer-passport',
     process.env.SELF_PUBLIC_ENDPOINT,
-    process.env.SELF_MOCK_MODE === 'true',
+    process.env.SELF_MOCK_MODE === 'false',
     AllIds, // accept all doc types
     configStore,
     'uuid', // "hex" for addresses, "uuid" for UUIDs
