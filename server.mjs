@@ -133,6 +133,7 @@ const verification_config = {
 console.log('🔍 Excluded Countries:', verification_config.excludedCountries);
 
 let selfBackendVerifier = null;
+let selfBackendVerifierMock = null;
 try {
   console.log('🚀 Initializing Self Protocol Backend Verifier...');
   const configStore = new DefaultConfigStore(verification_config);
@@ -144,10 +145,17 @@ try {
     configStore,
     'uuid', // "hex" for addresses, "uuid" for UUIDs
   );
+  selfBackendVerifierMock = new SelfBackendVerifier(
+    process.env.SELF_SCOPE || 'twilight-relayer-passport',
+    process.env.SELF_PUBLIC_ENDPOINT,
+    process.env.SELF_MOCK_MODE === 'true',
+    AllIds, // accept all doc types
+    configStore,
+    'uuid', // "hex" for addresses, "uuid" for UUIDs
+  );
   console.log('✅ Self Backend Verifier initialized');
   console.log('📋 Configuration:', {
     scope: process.env.SELF_SCOPE || 'twilight-relayer-passport',
-    isMock: process.env.SELF_MOCK_MODE === 'true',
     config: configStore,
   });
 } catch (err) {
@@ -162,7 +170,7 @@ app.get('/health', (_req, res) => {
     status: 'ok',
     message: 'Backend running',
     timestamp: new Date().toISOString(),
-    verifierReady: selfBackendVerifier !== null,
+    verifierReady: selfBackendVerifier !== null && selfBackendVerifierMock !== null,
     environment: process.env.NODE_ENV || 'development',
   });
 });
@@ -187,23 +195,20 @@ app.get('/disclosures', (_req, res) => {
   }
 });
 
-// ---------------------------------------------
-// Self Protocol verification endpoint (existing)
-// ---------------------------------------------
-app.post('/api/verify', async (req, res) => {
+// Helper function to handle Self Protocol verification
+async function handleSelfVerification(req, res, verifier, verifierName) {
   try {
     if (req.method === 'OPTIONS') return res.sendStatus(200);
 
     console.log('📨 Received Self verification request:', req.body);
-    if (!selfBackendVerifier) throw new Error('Self Backend Verifier not initialized');
+    if (!verifier) throw new Error(`Self Backend Verifier for ${verifierName} not initialized`);
 
     const { attestationId, proof, publicSignals, userContextData } = req.body;
 
     if (!proof || !publicSignals || !attestationId || !userContextData) {
       return res.status(400).json({
         status: 'error',
-        message:
-          'Proof, publicSignals, attestationId, and userContextData are required',
+        message: 'Proof, publicSignals, attestationId, and userContextData are required',
       });
     }
 
@@ -214,7 +219,7 @@ app.post('/api/verify', async (req, res) => {
       userContextDataLength: JSON.stringify(userContextData).length,
     });
 
-    const result = await selfBackendVerifier.verify(
+    const result = await verifier.verify(
       attestationId,
       proof,
       publicSignals,
@@ -260,7 +265,8 @@ app.post('/api/verify', async (req, res) => {
           ? '✅ Document is from an allowed country'
           : '❌ Document is not from an allowed country',
       });
-      //    verify if document is expired and the country is allowed
+      
+      // verify if document is expired and the country is allowed
       if (!isExpiryValid || !isCountryAllowed) {
         return res.status(400).json({
           status: 'error',
@@ -270,6 +276,7 @@ app.post('/api/verify', async (req, res) => {
           timestamp: new Date().toISOString(),
         });
       }
+      
       // Save BEFORE responding (fixes prior pattern)
       try {
         // If your DB helper accepts only (identifier, address), use attestationId + cosmosAddress.
@@ -291,14 +298,16 @@ app.post('/api/verify', async (req, res) => {
           result.userData?.userIdentifier,
           cosmosAddress,
           'self',
+          verifierName === 'mock passport' ? false : true,
         );
         console.log('uuid:', result.userData?.userIdentifier);
 
         console.log('💾 Data saved successfully:', savedRecord);
       } catch (dbErr) {
-        console.error('DB save failed (self):', dbErr);
+        console.error(`DB save failed (${verifierName}):`, dbErr);
         // continue anyway
       }
+      
       const response = {
         status: 'success',
         message: 'Verification completed',
@@ -329,8 +338,20 @@ app.post('/api/verify', async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   }
+}
+
+// Self Protocol verification endpoint with real passport (existing)
+// ---------------------------------------------
+app.post('/api/verify', async (req, res) => {
+  await handleSelfVerification(req, res, selfBackendVerifier, 'real passport');
 });
 
+// ---------------------------------------------
+// Self Protocol verification endpoint with mock passport
+// ---------------------------------------------
+app.post('/api/verify/self/mock', async (req, res) => {
+  await handleSelfVerification(req, res, selfBackendVerifierMock, 'mock passport');
+});
 // ----------------------------------------
 // NEW: ZKPassport verification endpoint
 // ----------------------------------------
@@ -376,7 +397,7 @@ app.post('/api/verify/zkpass', async (req, res) => {
     if (serverUID == clientUID && verified == true) {
       try {
         // If your DB helper accepts only (identifier, address), we store (clientUID || serverUID)
-        await saveVerification(clientUID || serverUID, cosmosAddress ?? null, 'zkpass');
+        await saveVerification(clientUID || serverUID, cosmosAddress ?? null, 'zkpass', !devMode);
         console.log('💾 ZKPass verification saved');
       } catch (dbErr) {
         console.error('DB save failed (zkpass):', dbErr);
@@ -414,22 +435,26 @@ app.post('/api/verify/whitelist', async (req, res) => {
       });
     }
 
-    const whitelisted = await checkAddressExists(recipientAddress.trim());
+    const addressCheck = await checkAddressExists(recipientAddress.trim());
+    const { exists: whitelisted, documentType } = addressCheck;
 
     return res.status(200).json({
       status: 'success',
       data: {
         address: recipientAddress.trim(),
         whitelisted,
+        documentType, // "real" or "mock" or null
       },
-      message: whitelisted ? 'Address is whitelisted' : 'Address is not whitelisted',
+      message: whitelisted
+        ? `Address is whitelisted with ${documentType} document`
+        : 'Address is not whitelisted',
     });
-  } catch (err) {
-    // Preserve exact shape even on DB errors
+  } catch (error) {
+    console.error('❌ Whitelist check error:', error);
     return res.status(500).json({
-      status: 'failed',
-      data: { address: '', whitelisted: false },
-      message: err,
+      status: 'error',
+      message: error?.message || 'Internal server error',
+      timestamp: new Date().toISOString(),
     });
   }
 });

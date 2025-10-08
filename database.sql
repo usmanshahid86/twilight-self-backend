@@ -22,7 +22,8 @@ Create database zkpass;
 CREATE TABLE public.zkpass (
     address text NOT NULL,
     identifier text NOT NULL,
-    provider text NOT NULL
+    provider text NOT NULL,
+    is_real boolean NOT NULL
 );
 
 

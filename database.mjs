@@ -17,25 +17,30 @@ export async function checkAddressExists(address) {
   }
 
   const sql =
-    "SELECT EXISTS(SELECT 1 FROM public.zkpass WHERE address = $1) AS exists";
+    'SELECT EXISTS(SELECT 1 FROM public.zkpass WHERE address = $1) AS exists, is_real FROM public.zkpass WHERE address = $1 LIMIT 1';
   const params = [address];
 
   try {
     const { rows } = await pool.query(sql, params);
-    return rows?.[0]?.exists === true;
+    const exists = rows?.[0]?.exists === true;
+    const isReal = rows?.[0]?.is_real === true;
+    return {
+      exists,
+      documentType: exists ? (isReal ? "real" : "mock") : null, // 1 = real, 0 = mock
+    };
   } catch (err) {
     throw new Error(`failed to check address existence: ${err.message}`);
   }
 }
 
 // Save verification data
-export async function saveVerification(uniqueIdentifier, address, provider) {
+export async function saveVerification(uniqueIdentifier, address, provider, isReal) {
   try {
     const result = await pool.query(
-      `INSERT INTO zkpass (address, identifier, provider)
-       VALUES ($1, $2, $3)
+      `INSERT INTO zkpass (address, identifier, provider, is_real)
+       VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [address, uniqueIdentifier, provider] // address -> $1, uniqueIdentifier -> $2, provider -> $3
+      [address, uniqueIdentifier, provider, isReal] // address -> $1, uniqueIdentifier -> $2, provider -> $3
     );
     return result.rows[0];
   } catch (error) {
